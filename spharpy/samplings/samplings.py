@@ -10,6 +10,7 @@ import warnings
 import scipy.io as sio
 import requests
 from multiprocessing.pool import ThreadPool
+from typing import Literal
 
 from ._eqsp import point_set as eq_point_set
 from ._eqsp import lebedev_sphere
@@ -301,6 +302,95 @@ def t_design(n_max, criterion='const_energy', radius=1.):
         points[..., 1] * radius,
         points[..., 2] * radius,
         n_max=n_max)
+
+    return sampling
+
+
+def maximum_determinant(n_max: int, radius: float = 1.0):
+    r"""
+    Return maximum determinant spherical sampling grid.
+
+    For detailed information, see [#]_. Maximum determinant (also called
+    Fekete or extremal) points are sets of :math:`L = (n_\text{max} + 1)^2`
+    points on the sphere that maximize the determinant of a basis matrix
+    for spherical harmonics up to order :math:`n_\text{max}`. As the number
+    of points equals the number of spherical harmonic coefficients, the
+    spherical harmonics matrix :math:`\mathbf{Y}` is square and well
+    conditioned, allowing for an inverse spherical harmonic transform
+    calculated as :math:`D = \mathbf{Y}^{-1}`. For a global maximum, the
+    Lebesgue constant of the interpolation is at most :math:`L` [#]_.
+
+    Parameters
+    ----------
+    n_max : int
+        Maximum applicable spherical harmonic order. Must be between ``0``
+        and ``29``. For ``n_max = 0``, a single point at
+        :math:`(x, y, z) = (1, 0, 0)` is returned.
+    radius : number, optional
+        Radius of the sampling grid in meters. The default is ``1``.
+
+    Returns
+    -------
+    sampling : :py:class:`spharpy.SamplingSphere`
+        Sampling positions with ``(n_max + 1)**2`` points. Sampling weights
+        can be obtained from :py:func:`calculate_sampling_weights`.
+
+    Notes
+    -----
+    This function downloads a pre-calculated set of points from [#]_ . The
+    data up to ``n_max = 20`` are loaded the first time this function is
+    called. The remaining data is loaded upon request.
+
+    References
+    ----------
+
+    .. [#]  I. H. Sloan and R. S. Womersley, “Extremal Systems of Points and
+            Numerical Integration on the Sphere,” Advances in Computational
+            Mathematics, vol. 21, no. 1/2, pp. 107-125, 2004.
+    .. [#]  https://web.maths.unsw.edu.au/~rsw/Sphere/MaxDet/
+    .. [#]  https://web.maths.unsw.edu.au/~rsw/Sphere/Points/MD/
+
+    Examples
+    --------
+
+    .. plot::
+
+        >>> import spharpy
+        >>> coords = spharpy.samplings.maximum_determinant(n_max=3)
+        >>> spharpy.plot.scatter(coords)
+
+    """
+    # check inputs
+    if not isinstance(n_max, (int)) or n_max < 0:
+        raise ValueError("n_max must be a non-negative integer.")
+    if not isinstance(radius, (int, float)) or radius <= 0:
+        raise ValueError("radius must be a positive number.")
+
+    # get the number of points
+    n_points = (n_max + 1) ** 2
+
+    # download data if necessary
+    filename = f"samplings_maximum_determinant_md{n_max:02d}.{n_points:04d}"
+    filename = os.path.join(os.path.dirname(__file__), "_eqsp", filename)
+    if not os.path.exists(filename):
+        if n_max < 21:
+            _md_grid_load_data(list(range(21)))
+        else:
+            _md_grid_load_data(n_max)
+
+    # open data
+    with open(filename, "rb") as f:
+        file_data = f.read()
+
+    # format data
+    points = np.fromstring(
+        file_data.decode(),
+        dtype=np.double,
+        sep=" ").reshape((n_points, 4))[:, :3]  # discard weights
+
+    # generate Coordinates object
+    sampling = spharpy.SamplingSphere.from_cartesian(
+        *(points.T * radius), n_max)  # type: ignore
 
     return sampling
 
@@ -1240,6 +1330,44 @@ def _sph_t_design_load_data(degrees='all'):
         filename = "sf%03d.%05d" % (degree, n_points)
         url = "http://web.maths.unsw.edu.au/~rsw/Sphere/Points/SF/"\
               "SF29-Nov-2012/"
+        fileurl = url + filename
+        path_save = os.path.join(
+            os.path.dirname(__file__), "_eqsp", prefix + filename)
+
+        entries.append((path_save, fileurl))
+
+    pool = ThreadPool(50)
+    pool.imap_unordered(_fetch_url, entries)
+    pool.close()
+    pool.join()
+
+
+def _md_grid_load_data(n: int | list[int] | Literal["all"] = "all"):
+    if isinstance(n, int):
+        degrees = [n]
+    elif isinstance(n, str):
+        degrees = list(range(1, 30))
+    else:
+        degrees = n
+
+    prefix = "samplings_maximum_determinant_"
+    # https://web.maths.unsw.edu.au/~rsw/Sphere/Points/MD/md01.0004
+    entries = []
+    for degree in degrees:
+        if degree == 0:
+            # define 0th order md-grid to be [1, 0, 0] in Cartesian
+            with open(
+                    os.path.join(
+                        os.path.dirname(__file__),
+                        "_eqsp",
+                        "samplings_maximum_determinant_md00.0001"),
+                    "w") as f:
+                np.savetxt(f, np.array([[1, 0, 0, np.pi]]))
+        # number of sampling points
+        n_points = (degree + 1) ** 2
+        # load the data
+        filename = f"md{degree:02d}.{n_points:04d}"
+        url = "https://web.maths.unsw.edu.au/~rsw/Sphere/Points/MD/"
         fileurl = url + filename
         path_save = os.path.join(
             os.path.dirname(__file__), "_eqsp", prefix + filename)
