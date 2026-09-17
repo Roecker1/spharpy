@@ -114,6 +114,7 @@ venv.bak/
 # external data that is loaded from the web
 spharpy/samplings/_eqsp/samplings_extremal*
 spharpy/samplings/_eqsp/samplings_t_design*
+spharpy/samplings/_eqsp/samplings_maximum_determinant*
 
 # workaround for failing test discovery in vscode
 tests/*/__init__.py
