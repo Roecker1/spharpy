@@ -332,8 +332,8 @@ def maximum_determinant(n_max: int, radius: float = 1.0):
     Returns
     -------
     sampling : :py:class:`spharpy.SamplingSphere`
-        Sampling positions with ``(n_max + 1)**2`` points. Sampling weights
-        can be obtained from :py:func:`calculate_sampling_weights`.
+        Sampling positions including sampling weights, with
+        ``(n_max + 1)**2`` points.
 
     Notes
     -----
@@ -361,8 +361,9 @@ def maximum_determinant(n_max: int, radius: float = 1.0):
 
     """
     # check inputs
-    if not isinstance(n_max, (int)) or n_max < 0:
-        raise ValueError("n_max must be a non-negative integer.")
+    if (not isinstance(n_max, int) or isinstance(n_max, bool)
+            or n_max < 0 or n_max > 29):
+        raise ValueError("n_max must be an integer between 0 and 29.")
     if not isinstance(radius, (int, float)) or radius <= 0:
         raise ValueError("radius must be a positive number.")
 
@@ -383,14 +384,18 @@ def maximum_determinant(n_max: int, radius: float = 1.0):
         file_data = f.read()
 
     # format data
-    points = np.fromstring(
+    file_data = np.fromstring(
         file_data.decode(),
         dtype=np.double,
-        sep=" ").reshape((n_points, 4))[:, :3]  # discard weights
+        sep=" ").reshape((n_points, 4))
 
     # generate Coordinates object
-    sampling = spharpy.SamplingSphere.from_cartesian(
-        *(points.T * radius), n_max)  # type: ignore
+    sampling = spharpy.SamplingSphere(
+        file_data[:, 0] * radius,
+        file_data[:, 1] * radius,
+        file_data[:, 2] * radius,
+        n_max=n_max, weights=file_data[:, 3],
+        comment='maximum determinant spherical sampling grid')
 
     return sampling
 
@@ -1343,10 +1348,27 @@ def _sph_t_design_load_data(degrees='all'):
 
 
 def _md_grid_load_data(n: int | list[int] | Literal["all"] = "all"):
+    """Download maximum determinant sampling grids.
+
+    Note: Samplings are downloaded from
+    https://web.maths.unsw.edu.au/~rsw/Sphere/Points/MD/
+
+    The grid for ``n = 0`` is not available upstream and is written locally
+    instead. It consists of a single point at ``(x, y, z) = (1, 0, 0)``
+    carrying the full weight of the unit sphere.
+
+    Parameters
+    ----------
+    n : int, list of int, str, optional
+        int or list of int load the samplings of the specified spherical
+        harmonic orders, `all` loads all samplings up to order 29, by
+        default 'all'.
+    """
+    # set the SH orders to be read
     if isinstance(n, int):
         degrees = [n]
     elif isinstance(n, str):
-        degrees = list(range(1, 30))
+        degrees = list(range(30))
     else:
         degrees = n
 
@@ -1354,26 +1376,27 @@ def _md_grid_load_data(n: int | list[int] | Literal["all"] = "all"):
     # https://web.maths.unsw.edu.au/~rsw/Sphere/Points/MD/md01.0004
     entries = []
     for degree in degrees:
-        if degree == 0:
-            # define 0th order md-grid to be [1, 0, 0] in Cartesian
-            with open(
-                    os.path.join(
-                        os.path.dirname(__file__),
-                        "_eqsp",
-                        "samplings_maximum_determinant_md00.0001"),
-                    "w") as f:
-                np.savetxt(f, np.array([[1, 0, 0, np.pi]]))
         # number of sampling points
         n_points = (degree + 1) ** 2
-        # load the data
         filename = f"md{degree:02d}.{n_points:04d}"
-        url = "https://web.maths.unsw.edu.au/~rsw/Sphere/Points/MD/"
-        fileurl = url + filename
         path_save = os.path.join(
             os.path.dirname(__file__), "_eqsp", prefix + filename)
 
+        if degree == 0:
+            # the 0th order grid is not available upstream. It is defined as
+            # a single point at [1, 0, 0] in Cartesian coordinates, which
+            # carries the weight of the entire unit sphere.
+            if not os.path.exists(path_save):
+                np.savetxt(path_save, np.array([[1, 0, 0, 4 * np.pi]]))
+            continue
+
+        # load the data
+        url = "https://web.maths.unsw.edu.au/~rsw/Sphere/Points/MD/"
+        fileurl = url + filename
+
         entries.append((path_save, fileurl))
 
+    # download in parallel
     pool = ThreadPool(50)
     pool.imap_unordered(_fetch_url, entries)
     pool.close()
