@@ -96,6 +96,9 @@ def download_sampling():
         elif kind == 't-design':
             from spharpy.samplings.samplings import _sph_t_design_load_data
             return _sph_t_design_load_data(degree)
+        elif kind == 'maximum-determinant':
+            from spharpy.samplings.samplings import _md_grid_load_data
+            return _md_grid_load_data(degree)
 
     return download_sampling
 

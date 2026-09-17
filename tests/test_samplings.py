@@ -152,6 +152,109 @@ def test_sph_t_design(download_sampling):
         samplings.t_design(2, radius='test')
 
 
+def test_maximum_determinant(download_sampling):
+    # load test data
+    download_sampling('maximum-determinant', list(range(11)))
+
+    # test with n_max
+    c = samplings.maximum_determinant(3)
+    assert type(c) is SamplingSphere
+    assert c.n_max == 3
+    assert c.csize == (3 + 1)**2
+
+    # test default radius
+    npt.assert_allclose(c.radius, 1, atol=1e-15)
+
+    # test sampling weights
+    npt.assert_allclose(np.sum(c.weights), 4 * np.pi, atol=1e-10)
+
+    # test loading an order > 9
+    c = samplings.maximum_determinant(10)
+    assert c.csize == (10 + 1)**2
+
+    # test user radius. The weights are solid angles and must not be scaled
+    c = samplings.maximum_determinant(2, radius=1.5)
+    npt.assert_allclose(c.radius, 1.5, atol=1e-15)
+    npt.assert_allclose(np.sum(c.weights), 4 * np.pi, atol=1e-10)
+
+
+def test_maximum_determinant_n_max_zero(download_sampling):
+    # the grid of order zero is not available online and written locally
+    download_sampling('maximum-determinant', 0)
+
+    c = samplings.maximum_determinant(0)
+    assert type(c) is SamplingSphere
+    assert c.csize == 1
+    npt.assert_allclose(c.cartesian, np.array([[1., 0., 0.]]), atol=1e-15)
+    npt.assert_allclose(np.sum(c.weights), 4 * np.pi, atol=1e-10)
+
+
+def test_maximum_determinant_load_above_order_20(download_sampling):
+    # orders above 20 are downloaded one at a time
+    download_sampling('maximum-determinant', 21)
+
+    c = samplings.maximum_determinant(21)
+    assert c.csize == (21 + 1)**2
+
+
+def test_maximum_determinant_limits(download_sampling):
+    download_sampling('maximum-determinant', 29)
+    samplings.maximum_determinant(29)
+    with pytest.raises(
+            ValueError,
+            match='n_max must be an integer between 0 and 29'):
+        samplings.maximum_determinant(30)
+    with pytest.raises(
+            ValueError,
+            match='n_max must be an integer between 0 and 29'):
+        samplings.maximum_determinant(-1)
+
+
+def test_maximum_determinant_invalid():
+    with pytest.raises(
+            ValueError,
+            match='n_max must be an integer between 0 and 29'):
+        samplings.maximum_determinant(1.5)
+    with pytest.raises(
+            ValueError,
+            match='n_max must be an integer between 0 and 29'):
+        samplings.maximum_determinant(True)
+    with pytest.raises(ValueError, match='radius must be a positive number'):
+        samplings.maximum_determinant(2, radius=-1)
+    with pytest.raises(ValueError, match='radius must be a positive number'):
+        samplings.maximum_determinant(2, radius='test')
+
+
+@pytest.mark.parametrize("n_max", list(range(30)))
+def test_maximum_determinant_for_each_order(n_max, download_sampling):
+    download_sampling('maximum-determinant', n_max)
+
+    c = samplings.maximum_determinant(n_max)
+    assert type(c) is SamplingSphere
+    assert c.n_max == n_max
+    assert c.csize == (n_max + 1)**2
+    npt.assert_allclose(c.radius, 1, atol=1e-15)
+    npt.assert_allclose(np.sum(c.weights), 4 * np.pi, atol=1e-10)
+
+
+@pytest.mark.parametrize("n_max", list(range(1, 30)))
+def test_maximum_determinant_invertibility(n_max, download_sampling):
+    """
+    Test that the spherical harmonic basis can be inverted directly.
+
+    Maximum determinant grids have as many points as there are spherical
+    harmonic coefficients, so the basis matrix is square and, by
+    construction, well conditioned.
+    """
+    download_sampling('maximum-determinant', n_max)
+
+    sampling = samplings.maximum_determinant(n_max)
+    Y = spherical_harmonic_basis_real(n_max, sampling)
+    Y_inverse = np.linalg.inv(Y)
+
+    npt.assert_allclose(Y_inverse @ Y, np.eye((n_max + 1)**2), atol=1e-13)
+
+
 def test_dodecahedron():
     sampling = samplings.dodecahedron()
     assert type(sampling) is SamplingSphere
